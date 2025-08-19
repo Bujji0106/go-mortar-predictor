@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Graphene Oxide Mortar Predictor</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .report-section { margin-top: 20px; }
+    .conditions-card { background: #f9f9f9; padding: 15px; margin-top: 15px; border-radius: 8px; }
+    table { margin-top: 15px; border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+    th { background: #eee; }
+    button { margin: 10px 5px; padding: 8px 12px; border-radius: 6px; border: none; background: #007bff; color: white; cursor: pointer; }
+    button:hover { background: #0056b3; }
+  </style>
+</head>
+<body>
+
+<h1>Graphene Oxide Mortar Predictor</h1>
+
+<!-- Input form -->
+<div>
+  <label>GO %: </label>
+  <input type="number" id="goInput" value="0.06" step="0.01" min="0" max="0.1">
+  
+  <label>Attack: </label>
+  <select id="attackInput">
+    <option value="control">Control</option>
+    <option value="sulphate">Sulphate (5% MgSO₄)</option>
+    <option value="acid">Acid (2% H₂SO₄)</option>
+    <option value="chloride">Chloride (3.5% NaCl)</option>
+  </select>
+
+  <label>Days: </label>
+  <input type="number" id="daysInput" value="120" min="1" max="365">
+
+  <button onclick="getCurve()">Predict</button>
+</div>
+
+<!-- Report -->
+<div class="report-section" id="report">
+  <h2>Prediction Report</h2>
+
+  <!-- Chart -->
+  <canvas id="resultsChart"></canvas>
+
+  <!-- Results Table -->
+  <h3>Numerical Results</h3>
+  <table id="resultsTable">
+    <thead>
+      <tr>
+        <th>Day</th>
+        <th>Strength (MPa)</th>
+        <th>Weight Loss (%)</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <!-- Test Conditions -->
+  <div class="conditions-card">
+    <h3>Test Conditions</h3>
+    <ul>
+      <li>Cube Size: 70.6 mm (IS Standard)</li>
+      <li>Fine Aggregate: M Sand – Zone II</li>
+      <li>Cement: OPC 53 Grade</li>
+      <li>Water-Cement Ratio: 0.6</li>
+    </ul>
+    <p id="decayInfo"><b>Decay Rate:</b> N/A</p>
+  </div>
+
+  <!-- Download Buttons -->
+  <button onclick="downloadCSV()">Download CSV</button>
+  <button onclick="downloadPDF()">Download PDF Report</button>
+</div>
+
+<script>
+let chart;
+
+// Fetch curve from Flask backend
+async function getCurve() {
+  const go = parseFloat(document.getElementById("goInput").value);
+  const attack = document.getElementById("attackInput").value;
+  const days = parseInt(document.getElementById("daysInput").value);
+
+  const response = await fetch(`/curve?go=${go}&attack=${attack}&days=${days}`);
+  const data = await response.json();
+
+  updateChart(data);
+  updateTable(data);
+  updateDecayInfo(data);
+}
+
+// Update Chart.js
+function updateChart(data) {
+  const ctx = document.getElementById("resultsChart").getContext("2d");
+  if (chart) chart.destroy();
+  chart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: data.days,
+      datasets: [
+        {
+          label: "Strength (MPa)",
+          data: data.strengths,
+          borderColor: "blue",
+          fill: false,
+          yAxisID: "y",
+        },
+        {
+          label: "Weight Loss (%)",
+          data: data.weights,
+          borderColor: "red",
+          fill: false,
+          yAxisID: "y1",
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: "index", intersect: false },
+      stacked: false,
+      plugins: { title: { display: true, text: "Strength & Weight Loss vs Days" } },
+      scales: {
+        y: { type: "linear", display: true, position: "left", title: { display: true, text: "Strength (MPa)" } },
+        y1: { type: "linear", display: true, position: "right", title: { display: true, text: "Weight Loss (%)" }, grid: { drawOnChartArea: false } }
+      }
+    }
+  });
+}
+
+// Update Table
+function updateTable(data) {
+  const tbody = document.querySelector("#resultsTable tbody");
+  tbody.innerHTML = "";
+  for (let i = 0; i < data.days.length; i++) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${data.days[i]}</td><td>${data.strengths[i].toFixed(2)}</td><td>${data.weights[i].toFixed(2)}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+// Update Decay Info
+function updateDecayInfo(data) {
+  const lastIdx = data.strengths.length - 1;
+  const decayRate = ((data.strengths[0] - data.strengths[lastIdx]) / data.strengths[0] * 100).toFixed(2);
+  document.getElementById("decayInfo").innerHTML = 
+    `<b>Decay Rate:</b> ${decayRate}% between Day 1 and Day ${data.days[data.days.length-1]}.
+     <br>Reason: Strength gain up to 56 days, then gradual reduction due to ${data.attack} exposure.`;
+}
+
+// Download CSV
+function downloadCSV() {
+  const rows = [["Day","Strength (MPa)","Weight Loss (%)"]];
+  const tbody = document.querySelector("#resultsTable tbody").children;
+  for (let tr of tbody) {
+    const cells = tr.children;
+    rows.push([cells[0].innerText, cells[1].innerText, cells[2].innerText]);
+  }
+  let csvContent = rows.map(e => e.join(",")).join("\n");
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "prediction_results.csv";
+  link.click();
+}
+
+// Download PDF
+function downloadPDF() {
+  const report = document.getElementById("report");
+  html2canvas(report).then(canvas => {
+    const imgData = canvas.toDataURL("image/png");
+    const pdf = new jspdf.jsPDF("p", "mm", "a4");
+    const imgProps = pdf.getImageProperties(imgData);
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+    pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
+    pdf.save("prediction_report.pdf");
+  });
+}
+</script>
+</body>
+</html>
