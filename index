@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Cement Mortar Predictor</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #f8f9fa; }
+    h1 { color: #2c3e50; }
+    form { margin-bottom: 20px; padding: 10px; background: #fff; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+    label { margin-right: 10px; font-weight: bold; }
+    input, select, button { margin-right: 15px; padding: 6px 10px; }
+    button { background: #3498db; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+    button:hover { background: #2980b9; }
+    canvas { max-width: 800px; margin-top: 20px; background: #fff; padding: 10px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+    #resultBox { margin-top: 20px; padding: 10px; background: #eaf7ea; border: 1px solid #a4d7a4; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Cement Mortar Strength & Durability Predictor</h1>
+
+  <form id="predictForm">
+    <label>GO %: <input type="number" id="go" name="go" step="0.01" value="0.06" required></label>
+    <label>Attack Type:
+      <select id="attack" name="attack">
+        <option value="control">Control</option>
+        <option value="sulphate">Sulphate</option>
+        <option value="acid">Acid</option>
+        <option value="chloride">Chloride</option>
+      </select>
+    </label>
+    <label>Days (curve length): <input type="number" id="days" name="days" value="120" required></label>
+    <label>Check at Day: <input type="number" id="singleDay" name="singleDay" value="28"></label>
+    <button type="submit">Predict</button>
+    <button type="button" id="downloadBtn">Download CSV</button>
+  </form>
+
+  <div id="resultBox">Enter values and click Predict to see results.</div>
+
+  <canvas id="strengthChart"></canvas>
+  <canvas id="weightChart"></canvas>
+
+  <script>
+    const ctxStrength = document.getElementById("strengthChart").getContext("2d");
+    const ctxWeight = document.getElementById("weightChart").getContext("2d");
+    let strengthChart, weightChart, lastData;
+
+    document.getElementById("predictForm").addEventListener("submit", async function(event) {
+      event.preventDefault();
+
+      const go = document.getElementById("go").value;
+      const attack = document.getElementById("attack").value;
+      const days = document.getElementById("days").value;
+      const singleDay = document.getElementById("singleDay").value;
+
+      // Fetch curve
+      const response = await fetch(`/curve?go=${go}&attack=${attack}&days=${days}`);
+      const data = await response.json();
+      lastData = data;
+
+      // Fetch single day prediction
+      const respSingle = await fetch(`/predict_single?go=${go}&attack=${attack}&day=${singleDay}&weight=true`);
+      const single = await respSingle.json();
+
+      document.getElementById("resultBox").innerHTML = `
+        <b>Attack:</b> ${attack}<br>
+        <b>Decay Rate:</b> ${data.decayRate}%<br>
+        <b>Day ${singleDay}:</b> Strength = ${single.strength} MPa, Weight Loss = ${single.weight_loss_pct} %
+      `;
+
+      // Destroy old charts
+      if (strengthChart) strengthChart.destroy();
+      if (weightChart) weightChart.destroy();
+
+      // Strength chart
+      strengthChart = new Chart(ctxStrength, {
+        type: "line",
+        data: {
+          labels: data.days,
+          datasets: [{
+            label: "Strength (N/mm²)",
+            data: data.strengths,
+            borderColor: "blue",
+            fill: false
+          }]
+        }
+      });
+
+      // Weight chart
+      weightChart = new Chart(ctxWeight, {
+        type: "line",
+        data: {
+          labels: data.days,
+          datasets: [{
+            label: "Weight Loss (%)",
+            data: data.weights,
+            borderColor: "red",
+            fill: false
+          }]
+        }
+      });
+    });
+
+    // Download CSV
+    document.getElementById("downloadBtn").addEventListener("click", function() {
+      if (!lastData) { alert("Please run a prediction first."); return; }
+      let csv = "Day,Strength,WeightLoss\n";
+      for (let i = 0; i < lastData.days.length; i++) {
+        csv += `${lastData.days[i]},${lastData.strengths[i]},${lastData.weights[i]}\n`;
+      }
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "prediction_results.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  </script>
+</body>
+</html>

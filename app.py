@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify, render_template
-from hybrid_predictor import predict_strength_curve, predict_weight_curve
+from hybrid_predictor import predict_strength_curve, predict_weight_curve, predict_single
 
 app = Flask(__name__, template_folder='.')
 
@@ -32,6 +32,34 @@ def curve():
         "weights": [float(x) for x in weights],
         "attack": attack,
         "decayRate": decay_rate
+    })
+
+@app.route("/predict_single")
+def single():
+    try:
+        go = float(request.args.get("go", 0.06))
+        attack = request.args.get("attack", "control").lower()
+        day = int(request.args.get("day", 28))
+        return_weight = request.args.get("weight", "false").lower() == "true"
+    except Exception:
+        return jsonify({"error": "Invalid input"}), 400
+
+    # Predict a single point
+    result = predict_single(go, day, attack, return_weight=return_weight)
+    if return_weight:
+        strength, weight = result
+        return jsonify({
+            "go_pct": go,
+            "day": day,
+            "attack": attack,
+            "strength": strength,
+            "weight_loss_pct": weight
+        })
+    return jsonify({
+        "go_pct": go,
+        "day": day,
+        "attack": attack,
+        "strength": result
     })
 
 if __name__ == "__main__":
